@@ -1,10 +1,11 @@
 """Bounded authenticated probes to user-saved servers only, without traffic logs."""
-import asyncio,time,socket
+import time,socket
 from PySide6.QtCore import QThread,Signal
-from core import choose_endpoint
 
 async def measure(profile,timeout=4):
+    import asyncio
     async def run():
+        from core import choose_endpoint
         records=await asyncio.get_running_loop().getaddrinfo(profile.host,profile.port,type=socket.SOCK_STREAM)
         start=time.perf_counter();await choose_endpoint(profile,[item[4][0] for item in records])
         return (time.perf_counter()-start)*1000
@@ -18,12 +19,14 @@ class LatencyScanner(QThread):
     measured=Signal(str,object)
     def __init__(self,items,timeout=4,parent=None,concurrency=2):super().__init__(parent);self.items=items;self.concurrency=concurrency;self.timeout=timeout;self.loop=None;self.task=None;self.stopping=False
     def run(self):
+        import asyncio
         self.loop=asyncio.new_event_loop();self.task=self.loop.create_task(self.scan())
         if self.stopping:self.task.cancel()
         try:self.loop.run_until_complete(self.task)
         except asyncio.CancelledError:pass
         finally:self.loop.close();self.loop=None
     async def scan(self):
+        import asyncio
         semaphore=asyncio.Semaphore(self.concurrency)
         async def check(ident,profile):
             async with semaphore:

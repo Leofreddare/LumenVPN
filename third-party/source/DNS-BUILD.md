@@ -1,0 +1,9 @@
+# DNS helper build
+
+Components: Unbound 1.26.1, OpenSSL 3.5.9, LLVM MinGW UCRT 20261006. Expat 2.9.0 provided configure-time headers/library for the upstream auxiliary-tool checks; the shipped helper is only unbound.exe. Upstream archives were downloaded through HTTPS; OpenSSL and LLVM MinGW release asset SHA-256 digests were checked against GitHub release metadata.
+
+Apply unbound-lumen-tls13.patch to the Unbound source. Build OpenSSL's static libraries with its mingw64 target, --cross-compile-prefix=x86_64-w64-mingw32-, no-shared, no-tests, no-module, no-dso, -O2 and compiler file-prefix mapping. Build/install static Expat with the same cross target. Configure Unbound with --build=x86_64-linux-gnu --host=x86_64-w64-mingw32 --with-ssl pointing to the built OpenSSL tree --with-libexpat pointing to the Expat tree --disable-shared --enable-static --without-pyunbound --without-pythonmodule --disable-flto, -O2, static linking and file-prefix mapping. Build only unbound.exe, then strip ordinary debug/symbol information with the toolchain's strip utility. CPU-dispatched OpenSSL assembly remains enabled.
+
+Default OpenSSL informational paths are /Lumen/OpenSSL, /Lumen/OpenSSL/engines and /Lumen/OpenSSL/modules. The generated compiler-flags information string was reduced to compiler: LLVM MinGW. Unbound's generated configure-command information substitutes <build> for the builder's path. These metadata changes do not alter TLS/DNSSEC algorithms. The shipped binary's hash is in engine-manifest.json.
+
+The patched source was built and exercised on Linux for signed and bogus DNSSEC records, in-memory caching, TLS certificate identity rejection and TLS 1.2 rejection. The Windows executable was cross-built, its PE/DLL imports inspected, and its integrity hash recorded; it was not executed in this environment. Validate live DNS/TUN routing on Windows before relying on it for sensitive use.

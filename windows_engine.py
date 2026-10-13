@@ -6,9 +6,9 @@ ROOT=Path(__file__).resolve().parent
 def configuration(endpoint, socks_port, api_port, secret, options=None):
     ip=ipaddress.ip_address(endpoint)
     options=options or {}
-    return {'log':{'disabled':True}, 'dns':{'servers':[{'type':'tls','tag':'secure-dns','server':options.get('dns_server','1.1.1.1'),'server_port':options.get('dns_port',853),'tls':{'enabled':True,'server_name':options.get('dns_name','cloudflare-dns.com')},'detour':'relay'}],'final':'secure-dns'},
+    return {'log':{'disabled':True}, 'dns':{'servers':[{'type':'udp','tag':'secure-dns','server':'127.0.0.1','server_port':options.get('_dns_local_port',5354)}],'final':'secure-dns'},
       'inbounds':[{'type':'tun','tag':'system','interface_name':'Lumen','address':['172.28.0.1/30','fdfe:dcba:9876::1/126'],'mtu':options.get('mtu',1400),'auto_route':True,'strict_route':True,'route_exclude_address':[f'{ip}/{ip.max_prefixlen}'],'stack':{'Mixed':'mixed','System':'system','gVisor':'gvisor'}.get(options.get('tun_stack','Mixed'),'mixed')}],
-      'outbounds':[{'type':'socks','tag':'relay','server':'127.0.0.1','server_port':socks_port,'version':'5'}],
+      'outbounds':[{'type':'socks','tag':'relay','server':'127.0.0.1','server_port':socks_port,'version':'5'},{'type':'direct','tag':'local-dns'}],
       'route':{'rules':([{'ip_version':6,'action':'reject'}] if options.get('block_ipv6') else [])+[{'port':53,'action':'hijack-dns'},{'network':'icmp','action':'reject'}],'final':'relay'},
       'experimental':{'clash_api':{'external_controller':f'127.0.0.1:{api_port}','secret':secret}}}
 
@@ -27,7 +27,9 @@ def ensure_components():
     if not valid():raise RuntimeError('A bundled networking component is missing or damaged. Extract the complete Lumen ZIP again. No files have been downloaded.')
 
 class WindowsEngine:
-    def __init__(self,options=None): self.options=options or {};self.process=None;self.directory=None;self.secret=secrets.token_hex(32);self.job=None
+    def __init__(self,options=None):
+        from local_dns import LocalDNS
+        self.options=dict(options or {});self.dns=LocalDNS(self.options);self.options["_dns_local_port"]=self.dns.port;self.process=None;self.directory=None;self.secret=secrets.token_hex(32);self.job=None
     def start(self, endpoint, port):
         if os.name!='nt':raise RuntimeError('Full-system routing requires Windows.')
         if not ctypes.windll.shell32.IsUserAnAdmin():raise RuntimeError('Run app.py and accept the Windows administrator prompt.')
@@ -51,11 +53,13 @@ class WindowsEngine:
                     if r.status==200:
                         # API readiness alone does not prove the adapter is present.
                         result=subprocess.run(['powershell','-NoProfile','-NonInteractive','-Command',"if (Get-NetAdapter -Name Lumen -ErrorAction SilentlyContinue | Where-Object Status -eq Up) {exit 0} else {exit 1}"],capture_output=True,creationflags=subprocess.CREATE_NO_WINDOW,timeout=5)
-                        if result.returncode==0:return
+                        if result.returncode==0:
+                            self.dns.start(self.directory.name);return
             except (OSError,subprocess.TimeoutExpired):pass
             time.sleep(.2)
         self.stop();raise RuntimeError('Windows adapter did not become ready within 20 seconds.')
     def stop(self):
+        self.dns.stop()
         if self.process and self.process.poll() is None:
             try:
                 subprocess.run([os.sys.executable,str(ROOT/'console_break.py'),str(self.process.pid)],creationflags=subprocess.CREATE_NO_WINDOW,timeout=3,check=True)

@@ -22,6 +22,8 @@ class NativeTunnel:
                 raise RuntimeError('The bundled Lumen transport is missing or damaged. Extract the complete ZIP again.')
         self.process=await asyncio.create_subprocess_exec(str(self.executable),stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.DEVNULL,creationflags=0x08000000 if os.name=='nt' else 0)
         request=asdict(self.profile);request['fingerprint']=self.profile.validate();request['warm']='warm' in self.capabilities and self.options.get('warm_connections',True)
+        request['dns_local_port']=self.options.get('_dns_local_port',0)
+        request['padding']='padding-v1' in self.capabilities
         request['chunk']={'64 KiB':65536,'128 KiB':131072,'256 KiB':262144}.get(self.options.get('stream_buffer'),detect().chunk)
         for key in ['dial_timeout', 'request_timeout', 'tcp_keepalive', 'warm_count', 'warm_lifetime', 'warm_retry', 'max_connections', 'idle_timeout', 'udp_queue_packets', 'udp_batch_packets', 'session_resumption', 'allow_udp']:
             if key in self.options:request[key]=self.options[key]

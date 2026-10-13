@@ -1,22 +1,21 @@
 """Polished grey Windows desktop client, with unlimited private relay profiles."""
-import asyncio, json, os, socket, sys, time, queue, threading
+import json, os, socket, sys, time, queue, threading
 from dataclasses import replace
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal, Qt, QStandardPaths, QObject, QTimer, QSize
 from PySide6.QtWidgets import QStackedWidget, QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFileDialog, QMessageBox, QDialog, QLineEdit, QScrollArea, QFrame, QFormLayout, QMenu, QSystemTrayIcon
-from core import Tunnel, Profile, choose_endpoint
+from profile_types import Profile
 from pairing import load_connection
 from profiles import ProfileStore, lookup_location
 from widgets import ActionButton, WorldMap, FadeLabel, SignalBars, QualityWidget, fast_pixmap, set_palette, icon, flag_pixmap, logo_icon
 from preferences import Preferences,SettingsPage,DocumentationPage
 from latency import LatencyScanner
-from windows_engine import WindowsEngine
-from native_transport import NativeTunnel
 
 class Worker(QThread):
     ready=Signal();failed=Signal(str);stats=Signal(int,int);endpoint=Signal(str);phase=Signal(str)
     def __init__(self,profile,options=None):super().__init__();self.profile=profile;self.options=options or {};self.loop=None;self.task=None;self.stopping=False
     def run(self):
+        import asyncio
         if self.stopping:return
         self.loop=asyncio.new_event_loop();asyncio.set_event_loop(self.loop);self.task=self.loop.create_task(self.session())
         if self.stopping:self.task.cancel()
@@ -26,6 +25,10 @@ class Worker(QThread):
             if not self.stopping:self.failed.emit(str(error))
         finally:self.loop.close();self.loop=None
     async def session(self):
+        import asyncio
+        from core import choose_endpoint
+        from windows_engine import WindowsEngine
+        from native_transport import NativeTunnel
         if os.name!='nt':raise RuntimeError('Full-system mode is available on Windows x64.')
         # Resolve before installing routes; every transport uses the excluded address.
         addresses=await asyncio.wait_for(self.loop.getaddrinfo(self.profile.host,self.profile.port,type=socket.SOCK_STREAM),self.options.get('dial_timeout',15))
@@ -35,8 +38,8 @@ class Worker(QThread):
         addresses.sort(key=lambda item:item[0]!=socket.AF_INET)
         self.phase.emit('Verifying your server…')
         endpoint,verified=await choose_endpoint(self.profile,[record[4][0] for record in addresses],options=self.options);self.endpoint.emit(endpoint)
-        tunnel=NativeTunnel(replace(self.profile,host=endpoint),verified.capabilities,options=self.options)
         engine=WindowsEngine(self.options)
+        tunnel=NativeTunnel(replace(self.profile,host=endpoint),verified.capabilities,options=engine.options)
         try:
             await tunnel.start();self.phase.emit("Preparing routing components…")
             # Shield startup so cancellation cannot leave an engine starting in a background thread.
@@ -49,6 +52,7 @@ class Worker(QThread):
             self.ready.emit()
             while True:
                 if engine.process.poll() is not None:raise RuntimeError('Windows adapter stopped. Reconnect to try again.')
+                if engine.dns.process.poll() is not None:raise RuntimeError('The local DNS validator stopped. Reconnect to try again.')
                 if tunnel.error:raise RuntimeError(tunnel.error)
                 self.stats.emit(tunnel.upload,tunnel.download);await asyncio.sleep(self.options.get('stats_interval',1))
         finally:
@@ -108,9 +112,11 @@ class GeoService(QObject):
     result=Signal(str,dict,str)
     def __init__(self,parent=None):
         super().__init__(parent);self.jobs=queue.Queue();self.pending=set();self.cache={};self.closed=False
-        threading.Thread(target=self.consume,daemon=True,name='Lumen locations').start()
+        self.thread=None
     def submit(self,ident,host):
         if self.closed or ident in self.pending:return
+        if self.thread is None:
+            self.thread=threading.Thread(target=self.consume,daemon=True,name="Lumen locations");self.thread.start()
         self.pending.add(ident);self.jobs.put((ident,host))
     def consume(self):
         while True:

@@ -2,5 +2,12 @@
   "version": "1.14.3",
   "engine_sha256": "5c19bb3f8c12d4e85b3d47fe63123a7624b314b58dd7a8e32f51004f1c4d2faf",
   "wintun_sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
-  "transport_sha256": "72fb5c5a6de4eedbb84c6f55e93d006a301a3f802800a7fee67bb4dd4a128a88"
+  "transport_sha256": "7de48d4ee6e82e045d8a1fec82e0b35455c2952ebec8b66b1126a8124a2a3522",
+  "dns_sha256": "b4aa2fff0c2d2acc5973d5979141e2f908f6d8bb191f82cd2a1f19745c6f8407",
+  "dns_ca_sha256": "9cc2a774b5198dcff14d9be1e66091f538975d867ce029a96bce15a55dfd730f",
+  "dns_anchor_sha256": "2c212250f1ec271109464e0db2f674f2b6b497da6a177d4d1b264fccb0f6d111",
+  "unbound_version": "1.26.1",
+  "dns_openssl_version": "3.5.9",
+  "dns_tls_minimum": "1.3",
+  "dns_build": "Lumen source build with TLS 1.3 patch"
 }

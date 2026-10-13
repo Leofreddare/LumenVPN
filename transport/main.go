@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -29,6 +30,8 @@ type config struct {
 	Pin            string `json:"fingerprint"`
 	Local          int    `json:"local_port"`
 	Warm           bool   `json:"warm"`
+	Padding        bool   `json:"padding"`
+	DNSPort        int    `json:"dns_local_port"`
 	Chunk          int    `json:"chunk"`
 	DialTimeout    int    `json:"dial_timeout"`
 	RequestTimeout int    `json:"request_timeout"`
@@ -101,6 +104,9 @@ func (p *proxy) open() (net.Conn, error) {
 func (p *proxy) request(c net.Conn, r *bufio.Reader, action, host string, port int) error {
 	c.SetDeadline(time.Now().Add(time.Duration(p.cfg.RequestTimeout) * time.Second))
 	req := map[string]any{"v": 1, "token": p.cfg.Token, "action": action}
+	if action == "connect" && p.cfg.Padding {
+		req["padding"] = true
+	}
 	if host != "" {
 		req["host"] = host
 		req["port"] = port
@@ -271,12 +277,76 @@ func copyData(dst net.Conn, src io.Reader, stats *atomic.Uint64, a *activity) {
 	}
 }
 
+func (p *proxy) destination(host string) (string, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String(), nil
+	}
+	ctx, cancel := context.WithTimeout(p.ctx, time.Duration(p.cfg.DialTimeout)*time.Second)
+	defer cancel()
+	resolver := net.DefaultResolver
+	if p.cfg.DNSPort != 0 {
+		resolver = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort("127.0.0.1", strconv.Itoa(p.cfg.DNSPort)))
+		}}
+	}
+	ips, e := resolver.LookupIPAddr(ctx, host)
+	if e != nil {
+		return "", e
+	}
+	if len(ips) == 0 {
+		return "", errors.New("empty DNS")
+	}
+	for _, ip := range ips {
+		if ip.IP.To4() != nil {
+			return ip.IP.String(), nil
+		}
+	}
+	return ips[0].IP.String(), nil
+}
+func (p *proxy) udpDestination(packet []byte) ([]byte, error) {
+	if len(packet) < 7 || packet[3] != 3 {
+		return packet, nil
+	}
+	n := int(packet[4])
+	if n == 0 || len(packet) < n+7 {
+		return nil, errors.New("UDP address")
+	}
+	host, port, e := readAddress(bytes.NewReader(packet[4:]), 3)
+	if e != nil {
+		return nil, e
+	}
+	address, e := p.destination(host)
+	if e != nil {
+		return nil, e
+	}
+	ip := net.ParseIP(address)
+	kind := byte(4)
+	if v4 := ip.To4(); v4 != nil {
+		kind = 1
+		ip = v4
+	}
+	out := make([]byte, 6+len(ip)+len(packet)-(n+7))
+	out[3] = kind
+	copy(out[4:], ip)
+	binary.BigEndian.PutUint16(out[4+len(ip):], uint16(port))
+	copy(out[6+len(ip):], packet[n+7:])
+	return out, nil
+}
 func (p *proxy) tcp(local net.Conn, host string, port int) error {
+	host, e := p.destination(host)
+	if e != nil {
+		return e
+	}
 	remote, r, e := p.remote("connect", host, port)
 	if e != nil {
 		return e
 	}
 	defer p.close(remote)
+	if p.cfg.Padding {
+		framed := &paddedConn{Conn: remote, reader: r}
+		remote = framed
+		r = bufio.NewReaderSize(framed, 4096)
+	}
 	local.SetDeadline(time.Time{})
 	if _, e = local.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0}); e != nil {
 		return e
@@ -400,11 +470,16 @@ func (p *proxy) udp(local net.Conn, expected int) error {
 			case packet := <-queue:
 				frames := batch[:0]
 				total := 0
+                accepted := 0
 				for count := 0; ; count++ {
 					var prefix [4]byte
-					binary.BigEndian.PutUint32(prefix[:], uint32(len(packet)))
-					frames = append(frames, prefix[:]...)
-					frames = append(frames, packet...)
+					normalized, err := p.udpDestination(packet)
+					if err == nil {
+						binary.BigEndian.PutUint32(prefix[:], uint32(len(normalized)))
+						frames = append(frames, prefix[:]...)
+						frames = append(frames, normalized...)
+                        accepted += len(packet)
+					}
 					total += len(packet)
 					queued.Add(-int64(len(packet)))
 					p.queued.Add(-int64(len(packet)))
@@ -424,7 +499,7 @@ func (p *proxy) udp(local net.Conn, expected int) error {
 				if _, e := remote.Write(frames); e != nil {
 					return
 				}
-				p.up.Add(uint64(total))
+				p.up.Add(uint64(accepted))
 			}
 		}
 	}()
@@ -503,6 +578,9 @@ func run() error {
 	cfg := config{DialTimeout: 15, RequestTimeout: 15, KeepAlive: 30, WarmCount: 2, WarmLifetime: 20, WarmRetry: 5, MaxConnections: 128, IdleTimeout: 300, UDPQueue: 128, UDPBatch: 32, Resume: true, AllowUDP: true}
 	if json.Unmarshal(line, &cfg) != nil {
 		return errors.New("config")
+	}
+	if cfg.DNSPort != 0 && (cfg.DNSPort < 1024 || cfg.DNSPort > 65535) {
+		return errors.New("DNS port")
 	}
 	if cfg.DialTimeout < 3 || cfg.DialTimeout > 30 || cfg.RequestTimeout < 2 || cfg.RequestTimeout > 30 || cfg.KeepAlive < 0 || cfg.KeepAlive > 120 || cfg.WarmCount < 1 || cfg.WarmCount > 2 || cfg.WarmLifetime < 5 || cfg.WarmLifetime > 20 || cfg.WarmRetry < 1 || cfg.WarmRetry > 30 || cfg.MaxConnections < 8 || cfg.MaxConnections > 128 || cfg.IdleTimeout < 30 || cfg.IdleTimeout > 900 || cfg.UDPQueue < 16 || cfg.UDPQueue > 128 || cfg.UDPBatch < 1 || cfg.UDPBatch > 32 {
 		return errors.New("config range")

@@ -42,3 +42,9 @@ Country display names and approximate map label positions are from Natural Earth
 ## Lumen native transport
 
 client/bin/lumen-transport.exe is this project's own MIT-licensed Go transport, compiled for Windows amd64 using Go 1.27.2 with its standard library only. The Go runtime and standard library retain their BSD-style license, supplied as client/bin/Go-LICENSE.txt. Upstream: https://go.dev/ and https://github.com/golang/go . Its source is in client/transport/main.go. No additional Go installation is required to run the client.
+
+## Local DNS validation
+
+Unbound 1.26.1 was built for Windows x64 from the upstream source at https://nlnetlabs.nl/downloads/unbound/unbound-1.26.1.tar.gz . Its license is Unbound-LICENSE.txt. The included source/unbound-lumen-tls13.patch requires TLS 1.3 for encrypted upstreams. The OpenSSL dependency was built from https://github.com/openssl/openssl/releases/tag/openssl-3.5.9 and its Apache 2.0 license is OpenSSL-LICENSE.txt. This replaces the older OpenSSL library embedded in the official Windows package. Build notes are in source/DNS-BUILD.md. No UPX or executable obfuscation was used; build paths were removed from informational strings.
+
+The public CA bundle comes from certifi/Mozilla (Certifi-LICENSE.txt); no user's trust store was copied. IANA root DS anchors come from https://data.iana.org/root-anchors/root-anchors.xml . Integrity hashes and versions are recorded in engine-manifest.json. Compiler/runtime notices are LLVM-LICENSE.txt and COPYING.MinGW-w64*.txt/COPYING.winpthreads.txt.

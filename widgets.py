@@ -127,15 +127,21 @@ class WorldMap(QWidget):
         import json
         super().__init__(parent);self.setMinimumHeight(230);self.setMouseTracking(True);self.locations=[];self.selected=None;self.hovered=None;self.mode='idle';self.phase=0.;self._point=QPointF(0,0)
         self.path=QPainterPath();self.centers=json.loads((ASSETS/'countries.json').read_text())
-        data=json.loads((ASSETS/'world.geojson').read_text())
-        for feature in data['features']:
-            g=feature['geometry'];polygons=g['coordinates'] if g['type']=='MultiPolygon' else [g['coordinates']]
-            for polygon in polygons:
-                for ring in polygon:
-                    if not ring or max(p[1] for p in ring)<-60:continue
-                    self.path.moveTo(ring[0][0],-ring[0][1])
-                    for lon,lat,*_ in ring[1:]:self.path.lineTo(lon,-lat)
-                    self.path.closeSubpath()
+        from PySide6.QtCore import QByteArray,QDataStream,QIODevice
+        cached=ASSETS/'map.path'
+        if cached.is_file():
+            cached_bytes=QByteArray(cached.read_bytes());stream=QDataStream(cached_bytes,QIODevice.ReadOnly);stream.setVersion(QDataStream.Qt_6_0);stream>>self.path
+            if stream.status()!=QDataStream.Ok:raise ValueError('Bundled map geometry is damaged.')
+        else:
+            data=json.loads((ASSETS/'world.geojson').read_text())
+            for feature in data['features']:
+                g=feature['geometry'];polygons=g['coordinates'] if g['type']=='MultiPolygon' else [g['coordinates']]
+                for polygon in polygons:
+                    for ring in polygon:
+                        if not ring or max(p[1] for p in ring)<-60:continue
+                        self.path.moveTo(ring[0][0],-ring[0][1])
+                        for lon,lat,*_ in ring[1:]:self.path.lineTo(lon,-lat)
+                        self.path.closeSubpath()
         self.move_animation=QPropertyAnimation(self,b'point',self);self.move_animation.setDuration(450);self.move_animation.setEasingCurve(QEasingCurve.InOutCubic)
         self.last_tick=time.monotonic();self.timer=QTimer(self);self.timer.setInterval(30);self.timer.timeout.connect(self.tick)
         self._land_key=None;self._land=None;self._markers_key=None;self._markers=[];self.motion=True;self.pulse=True;self.tooltips_enabled=True

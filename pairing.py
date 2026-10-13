@@ -1,7 +1,7 @@
 """Validate an explicitly imported connection file; never fetch secrets publicly."""
 import json
 from pathlib import Path
-from core import Profile
+from profile_types import Profile
 
 def load_connection(filename, local_port=1080):
     path=Path(filename)

@@ -2,7 +2,7 @@
 import json, os, uuid
 from dataclasses import replace
 from pathlib import Path
-from core import Profile
+from profile_types import Profile
 from pairing import remember, recall, key_name
 
 def metadata(profile,name=''):

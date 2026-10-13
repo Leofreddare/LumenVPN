@@ -69,7 +69,7 @@ All options apply on the next connection. Local previews never send a test reque
 ### Traffic and DNS
 
 - **MTU:** 1280–1500; default 1400. Match your network path rather than assuming larger is faster.
-- **Encrypted DNS:** resolver IP, certificate hostname and TLS port. Queries always go through the relay; the worker rejects private/reserved destinations.
+- **Encrypted DNS:** resolver IP, certificate hostname and TLS port. A bundled local validator checks DNSSEC and caches answers in memory; its verified TLS 1.3 DNS-over-TLS upstream goes through the relay. Unsigned zones do not have DNSSEC authentication. The worker rejects private/reserved destinations.
 - **Stream buffer:** Auto adapts to hardware; 64/128/256 KiB overrides trade memory for throughput.
 - **Concurrent connections:** 8–128 local TCP/UDP associations. Lower values bound memory use; higher values permit more simultaneous traffic.
 - **Idle timeout:** 30–900 seconds on client streams; the worker can enforce a shorter limit.
@@ -185,3 +185,6 @@ https://protonvpn.com/support/server-load-percentages-and-colors-explained
 https://github.com/ProtonVPN/win-app
 
 This documentation is local. The in-app viewer does not follow links or fetch remote resources.
+
+
+The security update retains pinned TLS 1.3, adds negotiated bounded TCP padding, and moves destination hostname resolution to the local DNSSEC validator. Padding changes TLS stream lengths, not guaranteed physical packet sizes; it adds overhead and cannot prevent timing correlation. The relay host still observes exit destinations and may inspect decrypted relay traffic. Website HTTPS and resolver DNS-over-TLS provide separate encryption to their destinations. A single relay cannot guarantee anonymity against its host. Keep saved server credentials when updating; older hostname-sending clients need ALLOW_REMOTE_DNS=1 on updated workers until migrated.
